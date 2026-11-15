@@ -1,0 +1,20 @@
+variable,nasa_label,unit,description,model_input
+participant_id,ID,,Coded crew identifier (C001-C004),no (kept for display)
+sample_name,derived,,"<participant>_serum_<timepoint>, matches OSD-575 Sample Name",no
+timepoint,Timepoint,,"Sampling timepoint: L-92, L-44, L-3 (days before launch), R+1, R+45, R+82, R+194 (days after return)",no
+day_offset,derived,day,"Days relative to launch. Inspiration4 flew 3 days, so R+N = day 3+N",no
+phase,derived,,PRE_FLIGHT or POST_FLIGHT,no
+nasa_timepoint_group,Timepoint2,,NASA grouping (Preflight / R+N),no
+assay_panel,Type,,Eve Technologies HDCVD9 (Human Cardiovascular Disease Panel 3 9-Plex),no
+a2_macroglobulin,a-2 Macroglobulin,ng/ml,Alpha-2 macroglobulin serum concentration,yes (as percent -> log fold change vs personal baseline)
+agp,AGP,ng/ml,Alpha-1 acid glycoprotein,yes
+crp,CRP,pg/ml,C-reactive protein,yes
+fetuin_a36,Fetuin A36,ng/ml,Fetuin-A,yes
+fibrinogen,Fibrinogen,ng/ml,Fibrinogen,yes
+haptoglobin,Haptoglobin,ng/ml,Haptoglobin (some values sit at an apparent assay upper limit),yes
+l_selectin,L-Selectin,pg/ml,L-selectin,yes
+pf4,PF4,ng/ml,Platelet factor 4,yes
+sap,SAP,pg/ml,Serum amyloid P component,yes
+concentration,Concentration,see unit,Measured concentration (4/5-parameter logistic standard curve),no (display only; redundant with percent)
+percent_of_crew_preflight_mean,Percent,%,"Concentration normalized by the average of pre-flight values from all crew (OSD-575 metadata)",yes (source of the model feature)
+at_assay_upper_limit,derived,,"True when the value is repeated identically >= 3 times in the analyte's upper quartile (probable censoring)",no

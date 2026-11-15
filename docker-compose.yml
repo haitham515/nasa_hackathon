@@ -1,0 +1,51 @@
+name: astra-cardio
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: astra
+      POSTGRES_USER: ${POSTGRES_USER:-astra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astra}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-astra} -d astra"]
+      interval: 5s
+      retries: 20
+
+  ai-service:
+    build: ./ai-service
+    environment:
+      ASTRA_BACKEND_URL: http://backend:8080
+    volumes:
+      - ./data:/data          # NASA raw files in, processed files out
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      retries: 30
+
+  backend:
+    build: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/astra
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-astra}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-astra}
+      ASTRA_AI_URL: http://ai-service:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  pgdata:

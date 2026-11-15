@@ -1,0 +1,111 @@
+{
+  "source_file": "LSDS-8_Multiplex_serum.cardiovascular.EvePanel_SUBMITTED.csv",
+  "study": "OSD-575",
+  "rows": 252,
+  "columns": [
+    "Analyte",
+    "Concentration",
+    "Timepoint",
+    "ID",
+    "Unit",
+    "Timepoint2",
+    "Type",
+    "Percent"
+  ],
+  "missing_values": {
+    "Analyte": 0,
+    "Concentration": 0,
+    "Timepoint": 0,
+    "ID": 0,
+    "Unit": 0,
+    "Timepoint2": 0,
+    "Type": 0,
+    "Percent": 0
+  },
+  "duplicate_rows": 0,
+  "duplicate_keys": 0,
+  "participants": [
+    "C001",
+    "C002",
+    "C003",
+    "C004"
+  ],
+  "timepoints": [
+    "L-92",
+    "L-44",
+    "L-3",
+    "R+1",
+    "R+45",
+    "R+82",
+    "R+194"
+  ],
+  "analytes": [
+    "AGP",
+    "CRP",
+    "Fetuin A36",
+    "Fibrinogen",
+    "Haptoglobin",
+    "L-Selectin",
+    "PF4",
+    "SAP",
+    "a-2 Macroglobulin"
+  ],
+  "units_by_analyte": {
+    "AGP": [
+      "ng/ml"
+    ],
+    "CRP": [
+      "pg/ml"
+    ],
+    "Fetuin A36": [
+      "ng/ml"
+    ],
+    "Fibrinogen": [
+      "ng/ml"
+    ],
+    "Haptoglobin": [
+      "ng/ml"
+    ],
+    "L-Selectin": [
+      "pg/ml"
+    ],
+    "PF4": [
+      "ng/ml"
+    ],
+    "SAP": [
+      "pg/ml"
+    ],
+    "a-2 Macroglobulin": [
+      "ng/ml"
+    ]
+  },
+  "assay_types": [
+    "HDCVD9"
+  ],
+  "non_numeric_concentration": 0,
+  "non_numeric_percent": 0,
+  "unknown_timepoints": [],
+  "unknown_analytes": [],
+  "blocking_problems": [],
+  "processed_samples": 28,
+  "transformations": [
+    "Read raw CSV with utf-8-sig (removes BOM); raw file left unmodified.",
+    "Validated columns, missing values, duplicates, numeric types, known timepoints/analytes.",
+    "Renamed columns to snake_case; kept original NASA analyte label and timepoint group.",
+    "Added day_offset relative to launch (Inspiration4: 3-day mission, R+N = day 3+N).",
+    "Added phase PRE_FLIGHT (L-92, L-44, L-3) / POST_FLIGHT (R+1..R+194).",
+    "Flagged values repeated identically >= 3 times in the upper quartile as probable assay upper limits.",
+    "Pivoted percent-of-crew-pre-flight-mean to one row per sample for modelling."
+  ],
+  "assay_upper_limit_values": {
+    "haptoglobin": [
+      "C002_serum_R+82",
+      "C003_serum_L-92",
+      "C004_serum_L-92",
+      "C004_serum_L-3",
+      "C004_serum_R+1",
+      "C004_serum_R+45",
+      "C004_serum_R+194"
+    ]
+  }
+}
