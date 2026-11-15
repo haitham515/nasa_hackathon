@@ -1,46 +1,55 @@
 # Architecture
 
 ```
-                 ┌──────────────────────────── ai-service (Python, FastAPI :8000) ───────────┐
- data/raw ──────►│ preprocessing ─► biomarker Isolation Forest      vitals Isolation Forest │
- (NASA OSD-575)  │                       ▲ /score/biomarkers              ▲ /score/vitals    │
-                 │ replay engine ── POST /api/readings ──┐  simulator (SIMULATED HR/HRV)     │
-                 └───────────────────────────────────────┼──────────────────────────────────┘
-                                                         ▼
- React (Vite :5173 / nginx :3000) ◄── SSE /api/stream ── backend (Spring Boot :8080) ──► PostgreSQL
-            │  REST /api/crew, /alerts, /replay …            ingest → score → status → alert
-            └────────────────────────────────────────────►
+┌──────────── ai-service (Python, FastAPI :8000) ────────────┐
+│ telemetry/generator  baseline + daily rhythm + random walk │
+│ telemetry/scenarios  random + injected anomaly episodes    │
+│ telemetry/stream     1 s tick → POST /api/telemetry/ingest │──┐
+│ analysis/            OpenAI (structured) → rule fallback   │◄─┼─ POST /analysis
+└────────────────────────────────────────────────────────────┘  │
+                                                                ▼
+┌──────────── backend (Spring Boot :8080) ───────────────────────────────┐      ┌──────────┐
+│ TelemetryService   ThresholdRules → status → anomaly episodes          │─────►│PostgreSQL│
+│ TelemetryQueryService  snapshot, event detail ±90 s, trend statistics  │      └──────────┘
+│ AnalysisService    one cached analysis per event (refreshed on escalation)
+│ SseBroadcaster     events: telemetry, anomaly, stream, ping            │
+└────────────────────────────────────────────────────────────────────────┘
+                 │ SSE /api/stream             ▲ REST /api/telemetry/*
+                 ▼                             │
+┌──────────── frontend (React + Recharts + jsPDF) ─────────────────────────┐
+│ useTelemetry: snapshot + live rolling windows (5 min HR, 15 min markers) │
+│ TelemetryChart: band, limits, clickable Attention/Review nodes           │
+│ DiagnosticPanel: standby summary or selected event + AI analysis → PDF   │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Flow of one reading
+## Flow of one sample
 
-1. The **replay engine** (ai-service) sends a reading to `POST /api/readings`, the same
-   endpoint a real device integration would use. Biomarker panels come from the NASA
-   file; heart-rate readings come from the simulator and are tagged `SIMULATED`.
-2. The **backend** stores it, then calls the AI service to score it
-   (`/score/biomarkers` or `/score/vitals`).
-3. The backend applies the **status rules** (`StatusRules.java`) to turn the score into
-   NORMAL / ATTENTION / REVIEW_REQUIRED, and creates an **alert** with a guidance code.
-4. After the transaction commits, the backend pushes a `reading` (and `alert`) event over
-   **Server-Sent Events**. The dashboard refetches what changed.
+1. Every second the generator emits heart rate. Every 5 s it also emits CRP, fibrinogen and troponin.
+   Values come from the astronaut's baseline plus noise, plus the offset of any active anomaly episode.
+2. `POST /api/telemetry/ingest` stores each sample with a status:
+   - outside the normal band → `ATTENTION`;
+   - beyond a review limit → `REVIEW_REQUIRED`.
+3. Breaches are grouped into **anomaly episodes**. The first breach opens one, a higher severity escalates it,
+   and 3 normal samples in a row close it.
+4. After commit, the backend pushes `telemetry` (samples) and `anomaly` (opened, escalated, closed) events.
+   The dashboard appends samples to its rolling windows without refetching.
+5. Clicking a marker loads the event detail (±90 s context and trend statistics) and requests the analysis.
+   The backend returns the cached analysis, or asks the AI service when there is none or the event escalated.
 
-## Why this split
+## AI analysis
 
-- **Python** owns everything statistical (pandas, scikit-learn) and the data replay.
-- **Spring Boot** owns persistence, business rules, alerting and the public API.
-- **Scoring is local**: no ground link is needed to evaluate a reading, which matches the
-  challenge's point that crews must assess their own health on long missions.
+- **OpenAI** (`OPENAI_API_KEY` set): `responses.parse` into a Pydantic `ClinicalAnalysis` schema.
+  The prompt allows only NASA-documented non-drug countermeasures and no dosing. Review events always escalate
+  to the flight surgeon. Only the event numbers, the trend and the other current readings are sent.
+- **Fallback**: a deterministic knowledge base keyed by metric and direction, paraphrased from NASA pages.
+  It is used when the key is missing or the API fails, and the panel shows which engine answered.
 
-## Mission timeline used by the replay
+## Robustness
 
-`L-92 → L-44 → L-3 → in flight (days 0-3, vitals only) → R+1 → R+45 → R+82 → R+194`.
-At speed ×1 the whole timeline plays in about 25 seconds (47 ticks × 0.5 s).
+- The generator buffers up to 600 samples while the backend is unreachable, then flushes them.
+- The dashboard shows `SIGNAL LOST` when no sample arrives for 6 s, and refetches its snapshot after an SSE reconnect.
+- Pausing closes open episodes, so nothing stays "ongoing" forever.
+- A retention job drops samples older than 24 h unless they belong to an anomaly episode.
 
-## Running modes
-
-| Mode | Database | How |
-|---|---|---|
-| Docker | PostgreSQL 16 | `docker compose up --build` |
-| Local dev | H2 in memory (PostgreSQL mode) | backend profile `local`, see README |
-
-The same Flyway migrations run in both modes.
+The archived Inspiration4 replay (OSD-575) still lives in the same services; see `archive-inspiration4.md`.

@@ -1,21 +1,4 @@
-// Display names and fixed orders shared across components.
-
-export const BIOMARKERS = [
-  { key: 'a2_macroglobulin', label: 'α2-Macroglobulin' },
-  { key: 'agp', label: 'AGP' },
-  { key: 'crp', label: 'CRP' },
-  { key: 'fetuin_a36', label: 'Fetuin-A' },
-  { key: 'fibrinogen', label: 'Fibrinogen' },
-  { key: 'haptoglobin', label: 'Haptoglobin' },
-  { key: 'l_selectin', label: 'L-Selectin' },
-  { key: 'pf4', label: 'PF4' },
-  { key: 'sap', label: 'SAP' },
-]
-
-export const biomarkerLabel = (key) => BIOMARKERS.find((b) => b.key === key)?.label ?? key
-
-export const TIMEPOINTS = ['L-92', 'L-44', 'L-3', 'R+1', 'R+45', 'R+82', 'R+194']
-export const BASELINE_TIMEPOINTS = ['L-92', 'L-3']
+// Shared labels and formatting helpers.
 
 export const STATUS = {
   NORMAL: { label: 'Normal', icon: '●', cls: 'status-normal' },
@@ -23,16 +6,51 @@ export const STATUS = {
   REVIEW_REQUIRED: { label: 'Review required', icon: '◆', cls: 'status-review' },
 }
 
-export const PHASE_LABEL = {
-  PRE_FLIGHT: 'Pre-flight',
-  IN_FLIGHT: 'In flight',
-  POST_FLIGHT: 'Post-flight',
+export const INJECT_OPTIONS = [
+  { value: 'heart_rate', label: 'Tachycardia (heart rate high)' },
+  { value: 'heart_rate_low', label: 'Bradycardia (heart rate low)' },
+  { value: 'crp', label: 'CRP rise' },
+  { value: 'fibrinogen', label: 'Fibrinogen rise' },
+  { value: 'troponin_i', label: 'Troponin elevation' },
+]
+
+const pad = (n) => String(n).padStart(2, '0')
+
+/** Mission elapsed time, e.g. "MET 3d 04:12:09". */
+export function formatMet(ms) {
+  if (ms == null || Number.isNaN(ms)) return '—'
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(s / 86400)}d ${pad(Math.floor((s % 86400) / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
 }
 
-export function missionDayLabel(day) {
-  if (day == null) return '—'
-  const d = Math.round(day)
-  if (d < 0) return `L${d}`
-  if (d <= 3) return `Flight day ${d}`
-  return `R+${d - 3}`
+export const formatUtcTime = (t) => {
+  const d = new Date(t)
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+}
+
+export const formatUtc = (t) => {
+  const d = new Date(t)
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${formatUtcTime(t)} UTC`
+}
+
+/** Value with the metric's natural precision. */
+export function formatValue(metricKey, v) {
+  if (v == null || Number.isNaN(v)) return '—'
+  if (metricKey === 'heart_rate') return Math.round(v).toString()
+  if (metricKey === 'troponin_i') return v.toFixed(1)
+  return v.toFixed(2)
+}
+
+export function normalRangeText(m) {
+  if (m.normalLow != null && m.normalHigh != null) return `${m.normalLow}–${m.normalHigh} ${m.unit}`
+  if (m.normalHigh != null) return `≤ ${m.normalHigh} ${m.unit}`
+  if (m.normalLow != null) return `≥ ${m.normalLow} ${m.unit}`
+  return '—'
+}
+
+export function reviewLimitsText(m) {
+  const parts = []
+  if (m.reviewLow != null) parts.push(`< ${m.reviewLow}`)
+  if (m.reviewHigh != null) parts.push(`> ${m.reviewHigh}`)
+  return parts.length ? `${parts.join(' or ')} ${m.unit}` : '—'
 }

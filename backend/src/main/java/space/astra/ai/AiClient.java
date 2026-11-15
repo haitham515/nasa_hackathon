@@ -7,11 +7,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
-/** HTTP client for the Python AI service (scoring + replay engine). */
+/** HTTP client for the Python AI service (telemetry stream, AI analysis, archived replay scoring). */
 @Component
 public class AiClient {
 
     private final RestClient http;
+    /** Same service, longer read timeout: AI analysis can take several seconds. */
+    private final RestClient slowHttp;
     private final tools.jackson.databind.json.JsonMapper mapper;
 
     public AiClient(@Value("${astra.ai-url}") String baseUrl, tools.jackson.databind.json.JsonMapper mapper) {
@@ -24,6 +26,9 @@ public class AiClient {
         var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(jdk);
         factory.setReadTimeout(java.time.Duration.ofSeconds(10));
         this.http = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
+        var slowFactory = new org.springframework.http.client.JdkClientHttpRequestFactory(jdk);
+        slowFactory.setReadTimeout(java.time.Duration.ofSeconds(60));
+        this.slowHttp = RestClient.builder().baseUrl(baseUrl).requestFactory(slowFactory).build();
         this.mapper = mapper;
     }
 
@@ -55,6 +60,30 @@ public class AiClient {
 
     public Map<String, Object> modelCard() {
         return get("/model/card");
+    }
+
+    // ---- 24/7 telemetry stream + AI analysis ----
+
+    public Map<String, Object> streamStatus() {
+        return get("/stream/status");
+    }
+
+    public Map<String, Object> pauseStream() {
+        return post("/stream/pause", Map.of());
+    }
+
+    public Map<String, Object> resumeStream() {
+        return post("/stream/resume", Map.of());
+    }
+
+    public Map<String, Object> injectAnomaly(String metric) {
+        return post("/stream/inject", Map.of("metric", metric));
+    }
+
+    public Map<String, Object> analyze(Map<String, Object> request) {
+        String json = mapper.writeValueAsString(request);
+        return parse(slowHttp.post().uri("/analysis").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(json).retrieve().body(String.class));
     }
 
     public boolean isUp() {

@@ -18,6 +18,11 @@ services:
     build: ./ai-service
     environment:
       ASTRA_BACKEND_URL: http://backend:8080
+      STREAM_AUTOSTART: "true"
+      STREAM_EPISODE_MEAN_S: ${STREAM_EPISODE_MEAN_S:-150}
+      # Optional: enables AI analysis. Without it the rule-based knowledge base answers.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
     volumes:
       - ./data:/data          # NASA raw files in, processed files out
     healthcheck:

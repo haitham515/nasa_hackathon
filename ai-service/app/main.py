@@ -1,29 +1,109 @@
-"""ASTRA AI service (FastAPI): anomaly scoring + replay/simulation engine.
+"""ASTRA AI service (FastAPI).
 
-Runs locally on board: no ground link is needed to score a reading.
+* 24/7 SIMULATED telemetry stream for one astronaut (posts to the backend).
+* Clinical analysis of anomaly events (OpenAI when configured, rule-based fallback).
+* Archived: OSD-575 Inspiration4 replay and its Isolation Forest models.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from app import config
+from app.analysis import openai_provider
+from app.analysis import service as analysis_service
 from app.models import biomarker_model, vitals_model
 from app.replay.engine import ReplayEngine
+from app.telemetry.stream import TelemetryStream
 
 logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="ASTRA AI service", version="1.0.0")
-engine = ReplayEngine()
 
+stream = TelemetryStream()
+engine = ReplayEngine()  # archived Inspiration4 replay
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if os.getenv("STREAM_AUTOSTART", "true").lower() == "true":
+        stream.start()
+    yield
+    stream.stop()
+
+
+app = FastAPI(title="ASTRA AI service", version="2.0.0", lifespan=lifespan)
+
+
+# ---------------------------------------------------------------- models
+
+class AnalysisRequest(BaseModel):
+    astronaut: dict = Field(default_factory=dict)
+    mission_elapsed: str | None = None
+    event: dict
+    selected_sample: dict = Field(default_factory=dict)
+    trend: dict = Field(default_factory=dict)
+    other_metrics: list[dict] = Field(default_factory=list)
+
+
+class InjectRequest(BaseModel):
+    metric: str
+
+
+# ---------------------------------------------------------------- health
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "UP", "stream": stream.status()["running"],
+            "ai_provider": "openai" if openai_provider.available() else "rule-based",
+            "ai_model": openai_provider.model_name() if openai_provider.available() else None}
+
+
+# ---------------------------------------------------------------- 24/7 stream
+
+@app.get("/stream/status")
+def stream_status() -> dict:
+    return {**stream.status(), "ai_provider": "openai" if openai_provider.available() else "rule-based",
+            "ai_model": openai_provider.model_name() if openai_provider.available() else None}
+
+
+@app.post("/stream/pause")
+def stream_pause() -> dict:
+    return stream.pause()
+
+
+@app.post("/stream/resume")
+def stream_resume() -> dict:
+    if not stream.status()["running"]:
+        stream.start()
+    return stream.resume()
+
+
+@app.post("/stream/inject")
+def stream_inject(req: InjectRequest) -> dict:
+    try:
+        return stream.inject(req.metric)
+    except KeyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------- AI analysis
+
+@app.post("/analysis")
+def analysis(req: AnalysisRequest) -> dict:
+    return analysis_service.analyze(req.model_dump())
+
+
+# ---------------------------------------------------------------- archived: Inspiration4 replay
 
 class BiomarkerScoreRequest(BaseModel):
     participant_id: str
     timepoint: str
     sample_name: str | None = None
-    percents: dict[str, float] = Field(description="biomarker key -> percent of crew pre-flight mean")
+    percents: dict[str, float]
 
 
 class VitalsScoreRequest(BaseModel):
@@ -36,18 +116,6 @@ class ReplayStartRequest(BaseModel):
     run_id: int | None = None
     speed: float = Field(default=1.0, gt=0, le=20)
     simulate: bool = True
-
-
-@app.on_event("startup")
-def _warm_up() -> None:
-    biomarker_model.load()
-    vitals_model.load()
-
-
-@app.get("/health")
-def health() -> dict:
-    return {"status": "UP", "biomarker_model": config.BIOMARKER_MODEL_FILE.exists(),
-            "vitals_model": config.VITALS_MODEL_FILE.exists()}
 
 
 @app.post("/train")

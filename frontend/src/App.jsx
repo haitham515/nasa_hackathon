@@ -1,129 +1,84 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, subscribe } from './api.js'
-import Header from './components/Header.jsx'
-import CrewBoard from './components/CrewBoard.jsx'
-import TimelinePanel from './components/TimelinePanel.jsx'
-import AlertsPanel from './components/AlertsPanel.jsx'
-import InfoDrawer from './components/InfoDrawer.jsx'
+import { useState } from 'react'
+import { useTelemetry } from './hooks/useTelemetry.js'
+import MissionHeader from './components/MissionHeader.jsx'
+import TelemetryChart from './components/TelemetryChart.jsx'
+import DiagnosticPanel from './components/DiagnosticPanel.jsx'
+
+const FEATURED_STORAGE_KEY = 'astra.featuredMetric'
+
+function readFeatured() {
+  try { return localStorage.getItem(FEATURED_STORAGE_KEY) ?? 'heart_rate' } catch { return 'heart_rate' }
+}
 
 export default function App() {
-  const [crew, setCrew] = useState([])
-  const [selected, setSelected] = useState('C001')
-  const [timeline, setTimeline] = useState(null)
-  const [alerts, setAlerts] = useState([])
-  const [selectedAlert, setSelectedAlert] = useState(null)
-  const [alertDetail, setAlertDetail] = useState(null)
-  const [replay, setReplay] = useState(null)
-  const [clock, setClock] = useState(null)
-  const [meta, setMeta] = useState(null)
-  const [showInfo, setShowInfo] = useState(false)
-  const [connected, setConnected] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
+  const t = useTelemetry()
+  const [selection, setSelection] = useState(null) // { eventId, sampleId }
+  const [notice, setNotice] = useState(null)
 
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
-  const refreshTimer = useRef(null)
-
-  const refresh = useCallback(async () => {
-    try {
-      const [c, a, r, t] = await Promise.all([
-        api.crew(), api.alerts(), api.replayStatus(), api.timeline(selectedRef.current),
-      ])
-      setCrew(c)
-      setAlerts(a)
-      setReplay(r)
-      const day = r?.engine?.day_offset
-      if (day != null) {
-        const phase = day < 0 ? 'PRE_FLIGHT' : r.engine.segment === 'IN_FLIGHT' ? 'IN_FLIGHT' : 'POST_FLIGHT'
-        setClock((c) => c ?? { dayOffset: day, phase })
-      }
-      setTimeline(t)
-      setError(null)
-    } catch (e) {
-      setError(`Backend unreachable: ${e.message}`)
-    }
-  }, [])
-
-  // Coalesce bursts of live events into one refresh.
-  const scheduleRefresh = useCallback(() => {
-    clearTimeout(refreshTimer.current)
-    refreshTimer.current = setTimeout(refresh, 200)
-  }, [refresh])
-
-  useEffect(() => {
-    refresh()
-    api.meta().then(setMeta).catch(() => {})
-    const off = subscribe({
-      reading: (e) => {
-        if (e) setClock((c) => (!c || e.dayOffset >= c.dayOffset ? { dayOffset: e.dayOffset, phase: e.missionPhase } : c))
-        scheduleRefresh()
-      },
-      alert: scheduleRefresh,
-      replay: (e) => {
-        if (e?.type === 'started' || e?.type === 'reset') {
-          setClock(null)
-          setSelectedAlert(null)
-          setAlertDetail(null)
-        }
-        scheduleRefresh()
-      },
-      connection: setConnected,
-    })
-    return () => { off(); clearTimeout(refreshTimer.current) }
-  }, [refresh, scheduleRefresh])
-
-  useEffect(() => {
-    api.timeline(selected).then(setTimeline).catch(() => {})
-  }, [selected])
-
-  useEffect(() => {
-    if (!selectedAlert) return
-    api.alert(selectedAlert).then(setAlertDetail).catch(() => setAlertDetail(null))
-  }, [selectedAlert, alerts])
-
-  const run = async (fn) => {
-    setBusy(true)
-    try {
-      await fn()
-      setError(null)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-      refresh()
-    }
+  const select = (sample) => {
+    if (sample?.eventId) setSelection({ eventId: sample.eventId, sampleId: sample.id ?? null })
   }
 
-  const selectedCrew = crew.find((c) => c.participantId === selected)
-  const baselineHr = selectedCrew?.hrBpm != null && selectedCrew?.hrDeltaBpm != null
-    ? selectedCrew.hrBpm - selectedCrew.hrDeltaBpm : null
+  const runAction = async (fn, message) => {
+    try {
+      await fn()
+      if (message) setNotice(message)
+    } catch (e) {
+      setNotice(`Action failed: ${e.message}`)
+    }
+    setTimeout(() => setNotice(null), 4000)
+  }
+
+  const [featuredKey, setFeaturedKey] = useState(readFeatured)
+  const chooseFeatured = (key) => {
+    setFeaturedKey(key)
+    try { localStorage.setItem(FEATURED_STORAGE_KEY, key) } catch { /* storage unavailable: keep in memory */ }
+  }
+  const featured = t.metrics.find((m) => m.key === featuredKey) ?? t.metrics[0]
+  const others = t.metrics.filter((m) => m !== featured)
 
   return (
-    <div className="app">
-      <Header replay={replay} clock={clock} connected={connected} busy={busy}
-        onStart={(speed, simulate) => run(() => api.startReplay(speed, simulate))}
-        onStop={() => run(api.stopReplay)}
-        onReset={() => run(api.resetReplay)}
-        onInfo={() => setShowInfo(true)} />
+    <div className="shell">
+      <MissionHeader astronaut={t.astronaut} linkState={t.linkState} stream={t.stream} now={t.now}
+        clockOffset={t.clockOffset}
+        onPause={() => runAction(t.pause, 'Stream paused. Open anomaly episodes were closed.')}
+        onResume={() => runAction(t.resume, 'Telemetry is live again.')}
+        onInject={(m) => runAction(() => t.inject(m), 'Test anomaly injected; watch the graph.')} />
 
-      {error && <div className="error-bar" role="alert">{error}</div>}
+      {t.error && <div className="error-bar" role="alert">{t.error}</div>}
+      {notice && <div className="notice" role="status">{notice}</div>}
 
-      <CrewBoard crew={crew} selected={selected} onSelect={setSelected} />
+      <div className="workspace">
+        <main className="charts">
+          {t.metrics.length > 0 && (
+            <div className="featured-picker" role="radiogroup" aria-label="Metric shown in the main graph">
+              <span className="featured-label">Main graph</span>
+              {t.metrics.map((m) => (
+                <button key={m.key} role="radio" aria-checked={m === featured} className="seg"
+                  onClick={() => chooseFeatured(m.key)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {featured && <TelemetryChart key={featured.key} large metric={featured} samples={t.series[featured.key] ?? []}
+            events={t.events} selected={selection} onSelect={select} />}
+          <div className="biomarker-grid">
+            {others.map((m) => (
+              <TelemetryChart key={m.key} metric={m} samples={t.series[m.key] ?? []} events={t.events}
+                selected={selection} onSelect={select} onEnlarge={() => chooseFeatured(m.key)} />
+            ))}
+          </div>
+          <p className="disclaimer">
+            SIMULATED telemetry for a fictional astronaut. Thresholds are illustrative. AI output is decision support for a
+            flight surgeon, not a diagnosis.
+          </p>
+        </main>
 
-      <div className="main">
-        <TimelinePanel participantId={selected} timeline={timeline} baselineHr={baselineHr} />
-        <AlertsPanel alerts={alerts} selectedId={selectedAlert} detail={alertDetail}
-          onSelect={(a) => { setSelectedAlert(a.id); setSelected(a.participantId) }}
-          onAcknowledge={(id) => run(() => api.acknowledge(id))} />
+        <DiagnosticPanel selection={selection} onClear={() => setSelection(null)} onSelect={select}
+          astronaut={t.astronaut} metrics={t.metrics} series={t.series} events={t.events} stream={t.stream} />
       </div>
 
-      <p className="disclaimer">
-        Exploratory prototype for NASA Space Apps 2026. Biomarkers: NASA OSDR OSD-575 (real). Heart rate / HRV: SIMULATED.
-        Notifications are not diagnoses.
-      </p>
-
-      {showInfo && <InfoDrawer meta={meta} onClose={() => setShowInfo(false)} />}
     </div>
   )
 }
